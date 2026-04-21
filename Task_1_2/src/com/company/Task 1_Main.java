@@ -10,23 +10,23 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 // Begin code changes by Walter Morris.
-// This implementation focuses on Task 1 requirements (single core, no I/O).
+// Task 1 scheduler simulation entry point and helpers.
 public class Main {
 
-    // Setting up the boundaries defined by the project specs
+    // Limits from the project specification.
     private static final int MIN_TASKS = 1;
     private static final int MAX_TASKS = 25;
     private static final int MIN_BURST = 1;
     private static final int MAX_BURST = 50;
-    
-    // This represents the time passing for ONE CPU cycle. 
-    // Kept short (10ms) so the simulation doesn't take forever to run.
+
+    // Duration of one simulated CPU cycle.
+    // Kept short so runs complete quickly.
     private static final long CLOCK_CYCLE_MS = 10L;
 
     public static void main(String[] args) {
         Config config;
         try {
-            // First things first, parse those command line arguments (-S, -C, etc.)
+            // Parse command-line options.
             config = Config.parse(args);
         } catch (IllegalArgumentException ex) {
             System.err.println("Error: " + ex.getMessage());
@@ -39,11 +39,10 @@ public class Main {
             return;
         }
 
-        // Initialize our random number generator. If a seed is provided (good for testing), use it.
+        // Use a seed when provided so results are reproducible.
         Random rng = (config.seed == null) ? new Random() : new Random(config.seed);
 
-        // Figure out how many tasks we are making. If the user didn't specify with -T, 
-        // we pick a random number between 1 and 25.
+        // If -T is omitted, choose a random task count in range.
         int taskCount;
         if (config.taskCount == null) {
             taskCount = randomInclusive(rng, MIN_TASKS, MAX_TASKS);
@@ -51,18 +50,18 @@ public class Main {
             taskCount = config.taskCount;
         }
 
-        // Generate the random bursts and arrival times for our tasks
+        // Build burst and arrival values for each task.
         List<Integer> bursts = buildBurstList(config, rng, taskCount);
         List<Integer> arrivals = buildArrivalList(config, rng, bursts.size());
 
         List<SimTask> tasks = new ArrayList<>();
-        
-        // Let's actually create the threads now.
+
+        // Create task threads.
         for (int i = 0; i < bursts.size(); i++) {
             int taskId = i + 1;
             SimTask task = new SimTask(taskId, bursts.get(i), arrivals.get(i));
             tasks.add(task);
-            // Spec requirement: Print creation of new threads
+            // Spec requirement: print thread creation.
             System.out.printf("[Main] Created Task %d | burst=%d | arrival=%d%n",
                     taskId, task.getTotalBurst(), task.getArrivalTick());
         }
@@ -73,21 +72,20 @@ public class Main {
         }
         System.out.printf("[Main] Task count=%d%n", tasks.size());
 
-        // We have to start the threads BEFORE the dispatcher so they are alive and waiting 
-        // in their `wait()` monitors for the CPU to give them cycles.
+        // Start tasks first so they can block on their monitor before dispatch begins.
         for (SimTask task : tasks) {
             task.start();
         }
 
-        // Fire up the dispatcher!
+        // Start dispatcher thread.
         Dispatcher dispatcher = new Dispatcher(config.algorithm, config.quantum, tasks);
         dispatcher.start();
 
-        // The main thread just hangs out here and waits for everything to finish up gracefully.
+        // Wait for dispatcher and task threads to finish.
         try {
             dispatcher.join(); // Wait for dispatcher
             for (SimTask task : tasks) {
-                task.join();   // Wait for all tasks to officially die
+                task.join();   // Wait for all task threads
             }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -98,15 +96,15 @@ public class Main {
         System.out.println("[Main] All tasks completed. Exiting.");
     }
 
-    // Helper to get a random number inclusive of the min and max
+    // Return a random integer in [min, max].
     private static int randomInclusive(Random rng, int min, int max) {
         return min + rng.nextInt(max - min + 1);
     }
 
-    // Builds our list of burst times. Handles both random generation and fixed user input (-B)
+    // Build burst list from -B or generate random values.
     private static List<Integer> buildBurstList(Config config, Random rng, int taskCount) {
         if (config.fixedBursts != null) {
-            return config.fixedBursts; // User gave us specific bursts
+            return config.fixedBursts; // User provided explicit bursts
         }
 
         List<Integer> bursts = new ArrayList<>();
@@ -116,19 +114,19 @@ public class Main {
         return bursts;
     }
 
-    // Handles arrival times. Remember, for FCFS, RR, and NSJF they all arrive at time 0.
-    // For PSJF, they need to arrive randomly AFTER things start running.
+    // Build arrival times.
+    // FCFS, RR, and NSJF all start at tick 0; PSJF may include late arrivals.
     private static List<Integer> buildArrivalList(Config config, Random rng, int taskCount) {
         List<Integer> arrivals = new ArrayList<>();
 
         if (config.algorithm != SchedulingAlgorithm.PSJF) {
             for (int i = 0; i < taskCount; i++) {
-                arrivals.add(0); // Everything starts at tick 0
+                arrivals.add(0); // All tasks start at tick 0
             }
             return arrivals;
         }
 
-        // PSJF logic: Tasks trickle in over time
+        // For PSJF, tasks can arrive over time.
         boolean hasLateArrival = false;
         for (int i = 0; i < taskCount; i++) {
             int arrival = randomInclusive(rng, 0, config.psjfMaxArrivalTick);
@@ -138,12 +136,12 @@ public class Main {
             }
         }
 
-        // Make sure at least one task arrives at time 0 so the CPU has something to start with
+        // Ensure at least one task arrives at tick 0 so the CPU can start.
         if (!arrivals.isEmpty()) {
             arrivals.set(0, 0);
         }
 
-        // Guarantee we actually test preemption by forcing a late arrival if rng was weird
+        // Ensure there is at least one late arrival to exercise preemption.
         if (!hasLateArrival && taskCount > 1) {
             int index = randomInclusive(rng, 1, taskCount - 1);
             arrivals.set(index, Math.max(1, config.psjfMaxArrivalTick / 2));
@@ -152,7 +150,7 @@ public class Main {
         return arrivals;
     }
 
-    // Simple enum to keep our algorithms organized
+    // Supported scheduling algorithms.
     private enum SchedulingAlgorithm {
         FCFS(1, "FCFS"),
         RR(2, "RR"),
@@ -177,9 +175,9 @@ public class Main {
         }
     }
 
-    // This nested class strictly handles the messy command line stuff
-    // Keeping it contained here is great practice so it doesn't clutter main()
+    // Parses and validates command-line arguments.
     private static class Config {
+
         private SchedulingAlgorithm algorithm;
         private Integer quantum;
         private Integer coreCount = 1;
@@ -204,7 +202,7 @@ public class Main {
                         }
                         config.algorithm = schedulingAlgorithm;
 
-                        // Only grab the quantum if they picked Round Robin (2)
+                        // RR requires a quantum after -S 2.
                         if (schedulingAlgorithm == SchedulingAlgorithm.RR) {
                             requireNext(args, i, "Missing RR time quantum after -S 2");
                             config.quantum = parseIntegerInRange(args[++i], 2, 10, "RR quantum");
@@ -246,7 +244,9 @@ public class Main {
                 }
             }
 
-            if (config.helpRequested) return config;
+            if (config.helpRequested) {
+                return config;
+            }
 
             if (config.algorithm == null) {
                 throw new IllegalArgumentException("Scheduling algorithm is required. Use -S <1|2|3|4>.");
@@ -270,7 +270,7 @@ public class Main {
             return config;
         }
 
-        // Helper to prevent ArrayOutOfBounds if user types "-S" and hits enter
+        // Validate that an option has a following value.
         private static void requireNext(String[] args, int currentIndex, String message) {
             if (currentIndex + 1 >= args.length) {
                 throw new IllegalArgumentException(message);
@@ -332,17 +332,16 @@ public class Main {
         }
     }
 
-    // --- THIS IS THE TASK THREAD ---
-    // Modeled to run a loop where each iteration is a CPU cycle.
+    // Task thread: waits for dispatch, runs granted cycles, then reports completion.
     private static class SimTask extends Thread {
 
         private final int taskId;
         private final int totalBurst;
         private final int arrivalTick;
 
-        // monitor is the locking object used to pause/resume this thread safely
+        // Monitor used to pause/resume this task safely.
         private final Object monitor = new Object();
-        // volatile ensures that changes to remainingBurst are immediately visible to the dispatcher
+        // Volatile ensures remainingBurst updates are visible across threads.
         private volatile int remainingBurst;
 
         private int grantedCycles;
@@ -364,26 +363,26 @@ public class Main {
             while (true) {
                 int cyclesToRun;
 
-                // 1. SLEEP PHASE: The thread waits here until the Dispatcher gives it cycles
+                // Wait here until the dispatcher grants CPU cycles.
                 synchronized (monitor) {
                     while (grantedCycles == 0) {
                         try {
-                            monitor.wait(); // Pause thread execution
+                            monitor.wait(); // Block until work is assigned
                         } catch (InterruptedException ex) {
                             Thread.currentThread().interrupt();
                             System.err.printf("[Task %d] Interrupted while waiting for CPU.%n", taskId);
-                            return; // Gracefully exit if crashed
+                            return; // Exit if interrupted
                         }
                     }
                     cyclesToRun = grantedCycles;
-                    grantedCycles = 0; // Reset for next time
+                    grantedCycles = 0; // Reset for next dispatch
                 }
 
-                // 2. RUN PHASE: We got cycles! Time to execute our burst loop.
+                // Execute up to the granted number of cycles.
                 int executed = 0;
                 while (executed < cyclesToRun && remainingBurst > 0) {
                     try {
-                        Thread.sleep(CLOCK_CYCLE_MS); // Simulating 1 CPU clock cycle
+                        Thread.sleep(CLOCK_CYCLE_MS); // Simulate one CPU tick
                     } catch (InterruptedException ex) {
                         Thread.currentThread().interrupt();
                         System.err.printf("[Task %d] Interrupted while running.%n", taskId);
@@ -393,27 +392,41 @@ public class Main {
                     executed++;
                 }
 
-                // 3. WAKE DISPATCHER PHASE: Tell the dispatcher we finished our allotted slice
+                // Signal dispatcher that this slice is complete.
                 synchronized (monitor) {
                     lastExecutedCycles = executed;
                     sliceCompleted = true;
-                    monitor.notifyAll(); // Wake up the waiting dispatcher
+                    monitor.notifyAll();
                 }
 
                 if (remainingBurst == 0) {
                     System.out.printf("[Task %d] Completed all %d cycles.%n", taskId, totalBurst);
-                    return; // Thread naturally dies when work is done
+                    return;
                 }
             }
         }
 
-        int getTaskId() { return taskId; }
-        int getTotalBurst() { return totalBurst; }
-        int getArrivalTick() { return arrivalTick; }
-        int getRemainingBurst() { return remainingBurst; }
-        boolean isFinished() { return remainingBurst == 0; }
+        int getTaskId() {
+            return taskId;
+        }
 
-        // The CPU function uses this to wake the thread up and tell it how long to run
+        int getTotalBurst() {
+            return totalBurst;
+        }
+
+        int getArrivalTick() {
+            return arrivalTick;
+        }
+
+        int getRemainingBurst() {
+            return remainingBurst;
+        }
+
+        boolean isFinished() {
+            return remainingBurst == 0;
+        }
+
+        // Called by CPU/dispatcher to grant cycles.
         void dispatchForCycles(int cycles) {
             if (cycles <= 0) {
                 throw new IllegalArgumentException("cycles must be positive");
@@ -422,11 +435,11 @@ public class Main {
             synchronized (monitor) {
                 sliceCompleted = false;
                 grantedCycles = cycles;
-                monitor.notifyAll(); // Wake up the monitor.wait() up in the run() method
+                monitor.notifyAll();
             }
         }
 
-        // The CPU function uses this to pause the dispatcher while this thread does its work
+        // Called by dispatcher to wait until this task finishes its slice.
         int waitForSliceCompletion() throws InterruptedException {
             synchronized (monitor) {
                 while (!sliceCompleted) {
@@ -437,23 +450,22 @@ public class Main {
         }
     }
 
-    // --- THIS IS THE DISPATCHER THREAD ---
-    // Manages the ready queue and figures out who runs when.
+    // Dispatcher thread: manages the ready queue and scheduling decisions.
     private static class Dispatcher extends Thread {
 
         private final SchedulingAlgorithm algorithm;
         private final int quantum;
 
-        // The single ready queue protected by a lock (Spec requirement)
+        // Single ready queue protected by a lock (spec requirement).
         private final Lock queueLock = new ReentrantLock();
         private final Deque<SimTask> readyQueue = new ArrayDeque<>();
-        
-        // Holds tasks that haven't "arrived" yet (mostly for PSJF)
+
+        // Tasks that have not reached their arrival tick yet.
         private final List<SimTask> pendingArrivals = new ArrayList<>();
 
         private final int totalTasks;
         private int completedTasks;
-        private int clockTick; // Master clock for the system
+        private int clockTick; // Master simulation clock
 
         Dispatcher(SchedulingAlgorithm algorithm, Integer quantum, List<SimTask> tasks) {
             super("Dispatcher");
@@ -470,38 +482,38 @@ public class Main {
             printQueue("initial");
 
             while (completedTasks < totalTasks) {
-                // Check if any new tasks arrived at this exact clock tick
+                // Add tasks whose arrival time has been reached.
                 enqueueArrivalsAtCurrentTime();
 
-                // Pick the next victim based on FCFS, RR, NSJF, or PSJF rules
+                // Select the next task based on the active algorithm.
                 SimTask selected = selectTask();
-                
+
                 if (selected == null) {
-                    // Nothing in the queue, let the clock tick forward 1 and check again
+                    // No ready tasks; advance one tick and try again.
                     System.out.printf("[Dispatcher][t=%d] CPU idle; waiting for next arrival.%n", clockTick);
                     tickClock(1);
                     continue;
                 }
 
-                // Figure out how much time we are giving this thread
+                // Determine how many cycles this dispatch should grant.
                 int cyclesGranted = determineCyclesToGrant(selected);
                 System.out.printf("[Dispatcher][t=%d] Selected Task %d; grant=%d cycle(s); remaining=%d%n",
                         clockTick, selected.getTaskId(), cyclesGranted, selected.getRemainingBurst());
 
-                // Pass to the CPU function (which is inside this thread per spec allowance)
+                // Run the selected task on the simulated CPU.
                 int executed = runOnCpu(selected, cyclesGranted);
-                clockTick += executed; // Fast forward our master clock by the time spent
+                clockTick += executed; // Advance simulation clock
 
-                // If tasks arrived while the CPU was busy, add them to the queue now
+                // Add tasks that arrived while CPU was busy.
                 enqueueArrivalsAtCurrentTime();
 
-                // Did the thread finish?
+                // Handle completion or requeue.
                 if (selected.isFinished()) {
                     completedTasks++;
                     System.out.printf("[Dispatcher][t=%d] Task %d finished (%d/%d complete).%n",
                             clockTick, selected.getTaskId(), completedTasks, totalTasks);
                 } else {
-                    requeueIfNeeded(selected); // Throw it back in the queue if it has remaining burst
+                    requeueIfNeeded(selected);
                 }
 
                 printQueue("after dispatch");
@@ -510,20 +522,20 @@ public class Main {
             System.out.printf("[Dispatcher] Finished. Total runtime=%d ticks.%n", clockTick);
         }
 
-        // Sorts tasks by arrival time so pendingArrivals is ready to go
+        // Sort by arrival time, then task ID for stable ordering.
         private void initializeQueues(List<SimTask> tasks) {
             tasks.sort(Comparator.comparingInt(SimTask::getArrivalTick).thenComparingInt(SimTask::getTaskId));
 
             for (SimTask task : tasks) {
                 if (task.getArrivalTick() == 0) {
-                    readyQueue.addLast(task); // Ready right now
+                    readyQueue.addLast(task);
                 } else {
-                    pendingArrivals.add(task); // Will be ready later
+                    pendingArrivals.add(task);
                 }
             }
         }
 
-        // Moves tasks from pending to ready if their arrival time has hit the master clock
+        // Move arrived tasks from pending to ready.
         private void enqueueArrivalsAtCurrentTime() {
             queueLock.lock();
             try {
@@ -544,7 +556,7 @@ public class Main {
             }
         }
 
-        // The brains of the scheduler. Pulls the right task based on the current algorithm.
+        // Select the next task according to scheduling policy.
         private SimTask selectTask() {
             queueLock.lock();
             try {
@@ -555,11 +567,11 @@ public class Main {
                 switch (algorithm) {
                     case FCFS:
                     case RR:
-                        // Just grab the first thing in line
+                        // Use queue order.
                         return readyQueue.pollFirst();
                     case NSJF:
                     case PSJF:
-                        // We have to scan the queue for the absolute shortest remaining burst
+                        // Choose shortest remaining burst in ready queue
                         SimTask shortest = null;
                         for (SimTask task : readyQueue) {
                             if (shortest == null || task.getRemainingBurst() < shortest.getRemainingBurst()) {
@@ -578,36 +590,35 @@ public class Main {
             }
         }
 
-        // Determines how long a thread gets to run before we pull it off the CPU
+        // Determine dispatch length for the selected task.
         private int determineCyclesToGrant(SimTask task) {
             switch (algorithm) {
                 case FCFS:
                 case NSJF:
-                    // They run until they die
+                    // Non-preemptive: run to completion
                     return task.getRemainingBurst();
                 case RR:
-                    // They run until they die OR hit the time quantum
+                    // Time-sliced by quantum
                     return Math.min(quantum, task.getRemainingBurst());
                 case PSJF:
-                    // We run it 1 tick at a time so we can constantly check for shorter arriving tasks
+                    // One tick at a time for preemption checks
                     return 1;
                 default:
                     throw new IllegalStateException("Unsupported algorithm: " + algorithm);
             }
         }
 
-        // --- THE CPU FUNCTION ---
-        // Satisfies the requirement: "The CPU must be represented as a separate function from the dispatcher..."
+        // CPU function kept separate from scheduling decisions.
         private int runOnCpu(SimTask task, int cyclesGranted) {
             System.out.printf("[CPU][t=%d] Running Task %d for up to %d cycle(s).%n",
                     clockTick, task.getTaskId(), cyclesGranted);
 
-            // Wakes up the task thread and tells it how long to run
+            // Wake task and grant cycles.
             task.dispatchForCycles(cyclesGranted);
 
             int executed;
             try {
-                // Dispatcher goes to sleep while the task thread does the actual work
+                // Wait for the task to finish its granted slice.
                 executed = task.waitForSliceCompletion();
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
@@ -620,16 +631,15 @@ public class Main {
             return executed;
         }
 
-        // Puts the task back in line if it didn't finish
+        // Requeue unfinished task based on algorithm.
         private void requeueIfNeeded(SimTask task) {
             queueLock.lock();
             try {
-                // RR and PSJF throw it to the back of the line
+                // RR and PSJF use round-robin style requeue.
                 if (algorithm == SchedulingAlgorithm.RR || algorithm == SchedulingAlgorithm.PSJF) {
                     readyQueue.addLast(task);
                 } else {
-                    // FCFS/NSJF technically shouldn't hit this because they run to completion, 
-                    // but if they do, put them back in front.
+                    // FCFS/NSJF should rarely requeue, but keep behavior defined.
                     readyQueue.addFirst(task);
                 }
             } finally {
@@ -637,7 +647,7 @@ public class Main {
             }
         }
 
-        // Idles the CPU clock if nothing is ready
+        // Advance time while CPU is idle.
         private void tickClock(int ticks) {
             for (int i = 0; i < ticks; i++) {
                 try {
@@ -650,7 +660,7 @@ public class Main {
             }
         }
 
-        // Helper to print the queue so the TA can see what's happening internally
+        // Print ready queue contents for trace/debug output.
         private void printQueue(String context) {
             queueLock.lock();
             try {
@@ -675,4 +685,4 @@ public class Main {
         }
     }
 }
-//End code changes by Walter Morris.
+// End code changes by Walter Morris.
