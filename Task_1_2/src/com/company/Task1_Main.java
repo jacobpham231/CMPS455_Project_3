@@ -11,7 +11,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 // Begin code changes by Walter Morris.
 // Task 1 scheduler simulation entry point and helpers.
-public class Main {
+public class Task1_Main {
 
     // Limits from the project specification.
     private static final int MIN_TASKS = 1;
@@ -319,7 +319,7 @@ public class Main {
         }
 
         private static void printUsage() {
-            System.out.println("Usage: java com.company.Main -S <algorithm> [quantum] [-C <cores>] [-T <tasks>] [-B <b1,b2,...>] [-A <maxArrivalTick>] [--seed <n>]");
+            System.out.println("Usage: java -cp Task_1_2\\bin com.company.Task1_Main -S <1|2|3|4> [rrQuantumIfS2] [-C <cores>] [-T <tasks>] [-B <b1,b2,...>] [-A <maxArrivalTick>] [--seed <n>]");
             System.out.println("  -S 1             FCFS");
             System.out.println("  -S 2 <2-10>      RR with quantum");
             System.out.println("  -S 3             NSJF");
