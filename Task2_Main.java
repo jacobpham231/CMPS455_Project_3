@@ -441,44 +441,6 @@ public class Task2_Main { //Multi-core CPU scheduling simulation
         System.err.println("  java Task2_Main -S 3 -C 2");
     }
 
-    private static int promptIntegerInRange(Scanner scanner, String prompt, int min, int max) {
-        while (true) {
-            System.out.print(prompt);
-            if (!scanner.hasNextLine()) {
-                throw new IllegalArgumentException("Interactive input ended before all required values were provided.");
-            }
-            String input = scanner.nextLine().trim();
-            try {
-                int value = Integer.parseInt(input);
-                if (value >= min && value <= max) {
-                    return value;
-                }
-            } catch (NumberFormatException ignored) {
-                // Keep prompting until valid numeric input is provided.
-            }
-            System.out.printf("Please enter an integer in [%d, %d].%n", min, max);
-        }
-    }
-
-    private static String[] promptForArguments() {
-        Scanner scanner = new Scanner(System.in);
-
-        System.out.println("No command-line arguments detected.");
-        System.out.println("  1 = FCFS");
-        System.out.println("  2 = RR");
-        System.out.println("  3 = NSJF");
-
-        int algorithm = promptIntegerInRange(scanner, "Choose scheduler (-S 1,2,3,4): ", 1, 3);
-        int cores = promptIntegerInRange(scanner, "Choose core count (-C 1-4): ", 1, 4);
-
-        if (algorithm == 2) {
-            int quantum = promptIntegerInRange(scanner, "Choose RR quantum (2-10): ", 2, 10);
-            return new String[]{"-S", "2", String.valueOf(quantum), "-C", String.valueOf(cores)};
-        }
-
-        return new String[]{"-S", String.valueOf(algorithm), "-C", String.valueOf(cores)};
-    }
-
     private static String coreLabel(int cores) { //returns readable core label for output
         return switch (cores) {
             case 1 -> "single core";
@@ -500,13 +462,7 @@ public class Task2_Main { //Multi-core CPU scheduling simulation
 
     public static void main(String[] args) { //main method that sets up and runs the full simulation
         try {
-            String[] effectiveArgs = args;
-            if (effectiveArgs.length == 0) {
-                effectiveArgs = promptForArguments();
-                System.out.println("Running with: " + String.join(" ", effectiveArgs));
-            }
-
-            Config config = parseArguments(effectiveArgs); //reads command-line input
+            Config config = parseArguments(args); //reads command-line input
             printConfig(config); //prints selected settings
 
             int threadCount = ThreadLocalRandom.current().nextInt(4, 9); //randomly generates number of process threads
