@@ -4,7 +4,7 @@ import java.util.concurrent.ThreadLocalRandom; //Random number generator
 import java.util.concurrent.atomic.AtomicInteger; //to track completed tasks across multiple threads
 import java.util.concurrent.locks.ReentrantLock; //to protect shared resources
 
-public class Main { //Multi-core CPU scheduling simulation
+public class Task2_Main { //Multi-core CPU scheduling simulation
 
     // Begin code changes by Reem.
     enum Algorithm { //stores the scheduling algorithms supported in Task 2
@@ -423,6 +423,62 @@ public class Main { //Multi-core CPU scheduling simulation
         return config; //returns validated config object
     }
 
+    private static void printUsage() {
+        System.err.println("Usage:");
+        System.err.println("  java Task2_Main -S <algorithm> [-C <cores>]");
+        System.err.println();
+        System.err.println("Algorithm options for -S:");
+        System.err.println("  -S 1           FCFS");
+        System.err.println("  -S 2 <2-10>    RR with required time quantum");
+        System.err.println("  -S 3           NSJF");
+        System.err.println();
+        System.err.println("Core options:");
+        System.err.println("  -C <1-4>       Number of CPU cores (default 1)");
+        System.err.println();
+        System.err.println("Examples:");
+        System.err.println("  java Task2_Main -S 1 -C 4");
+        System.err.println("  java Task2_Main -S 2 5 -C 4");
+        System.err.println("  java Task2_Main -S 3 -C 2");
+    }
+
+    private static int promptIntegerInRange(Scanner scanner, String prompt, int min, int max) {
+        while (true) {
+            System.out.print(prompt);
+            if (!scanner.hasNextLine()) {
+                throw new IllegalArgumentException("Interactive input ended before all required values were provided.");
+            }
+            String input = scanner.nextLine().trim();
+            try {
+                int value = Integer.parseInt(input);
+                if (value >= min && value <= max) {
+                    return value;
+                }
+            } catch (NumberFormatException ignored) {
+                // Keep prompting until valid numeric input is provided.
+            }
+            System.out.printf("Please enter an integer in [%d, %d].%n", min, max);
+        }
+    }
+
+    private static String[] promptForArguments() {
+        Scanner scanner = new Scanner(System.in);
+
+        System.out.println("No command-line arguments detected.");
+        System.out.println("  1 = FCFS");
+        System.out.println("  2 = RR");
+        System.out.println("  3 = NSJF");
+
+        int algorithm = promptIntegerInRange(scanner, "Choose scheduler (-S 1,2,3,4): ", 1, 3);
+        int cores = promptIntegerInRange(scanner, "Choose core count (-C 1-4): ", 1, 4);
+
+        if (algorithm == 2) {
+            int quantum = promptIntegerInRange(scanner, "Choose RR quantum (2-10): ", 2, 10);
+            return new String[]{"-S", "2", String.valueOf(quantum), "-C", String.valueOf(cores)};
+        }
+
+        return new String[]{"-S", String.valueOf(algorithm), "-C", String.valueOf(cores)};
+    }
+
     private static String coreLabel(int cores) { //returns readable core label for output
         return switch (cores) {
             case 1 -> "single core";
@@ -444,7 +500,13 @@ public class Main { //Multi-core CPU scheduling simulation
 
     public static void main(String[] args) { //main method that sets up and runs the full simulation
         try {
-            Config config = parseArguments(args); //reads command-line input
+            String[] effectiveArgs = args;
+            if (effectiveArgs.length == 0) {
+                effectiveArgs = promptForArguments();
+                System.out.println("Running with: " + String.join(" ", effectiveArgs));
+            }
+
+            Config config = parseArguments(effectiveArgs); //reads command-line input
             printConfig(config); //prints selected settings
 
             int threadCount = ThreadLocalRandom.current().nextInt(4, 9); //randomly generates number of process threads
@@ -513,10 +575,7 @@ public class Main { //Multi-core CPU scheduling simulation
             System.out.println("Main thread     | Exiting."); //final exit message
         } catch (IllegalArgumentException e) { //handles invalid command-line input
             System.err.println("Error: " + e.getMessage());
-            System.err.println("Usage examples:");
-            System.err.println("  java Main -S 1 -C 4");
-            System.err.println("  java Main -S 2 5 -C 4");
-            System.err.println("  java Main -S 3 -C 2");
+            printUsage();
         } catch (InterruptedException e) { //handles thread interruption safely
             Thread.currentThread().interrupt();
             System.err.println("Program interrupted.");
